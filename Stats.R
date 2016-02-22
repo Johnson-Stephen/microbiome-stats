@@ -1183,34 +1183,33 @@ subset_dist <- function (dist.obj, samIDs) {
 perform_sequence_stat_analysis <- function (data.obj, ann='') {
 	sink(paste0('Sequence_Analysis_Statistics_', ann, '.txt'))
 	otu.tab <- data.obj$otu.tab
-	
+
 	# Sequencing depth
 	otu.abund <- rowSums(otu.tab)
 	sam.abund <- colSums(otu.tab)
 	otu.prev <- rowSums(otu.tab!=0)/ncol(otu.tab)
-	
+
 	otu.abund <- otu.abund[otu.abund >= 1]
 	sam.abund <- sam.abund[sam.abund >= 1]
 	cat('16S rDNA targeted sequencing yields ', mean(sam.abund), 'reads/sample on average (range:', min(sam.abund), '-', max(sam.abund), ').')
 	cat('Clustering of these 16S sequence tags produces ', sum(otu.abund > 0), ' OTUs at 97% similarity level.')
-	
-	pdf(paste0('Sequence_Analysis_Statistics_', ann, '.pdf'), height=5, width=5)
+
+	png(paste0('Sequence_Analysis_Statistics_', ann, '.png'), height=600, width=900)
 	obj <- ggplot2::ggplot(data=data.frame(x=otu.abund), aes(x=x)) + geom_histogram(col='black', fill='gray') + ylab('Frequency') + xlab('Abundance(Total counts)') +
-			scale_x_log10(breaks=c(1, 10, 100, 1000, 10000, 100000, 100000))
-	print(obj)
-	obj <- ggplot2::ggplot(data=data.frame(x=sam.abund), aes(x=x)) + geom_histogram(col='black', fill='gray')  + ylab('Frequency') + xlab('Sequencing depth')
-	print(obj)
-	obj <- ggplot2::ggplot(data=data.frame(x=otu.prev), aes(x=x))  + ylab('Frequency') + xlab('Prevalence(Occurence frequency)') + geom_histogram(col='black', fill='gray')
-	print(obj)
+		scale_x_log10(breaks=c(1, 10, 100, 1000, 10000, 100000, 100000))
+	obj2 <- ggplot2::ggplot(data=data.frame(x=sam.abund), aes(x=x)) + geom_histogram(col='black', fill='gray')  + ylab('Frequency') + xlab('Sequencing depth')
+	obj3 <- ggplot2::ggplot(data=data.frame(x=otu.prev), aes(x=x))  + ylab('Frequency') + xlab('Prevalence(Occurence frequency)') + geom_histogram(col='black', fill='gray')
+	multiplot(obj,obj2,obj3, cols=1)
 	dev.off()
-	
+
 	phy.abund <- data.obj$abund.list[['Phylum']]
 	fam.abund <- data.obj$abund.list[['Family']]
 	gen.abund <- data.obj$abund.list[['Genus']]
-	
+
 	phy.prev <- rowSums(phy.abund != 0) / ncol(phy.abund)
 	fam.prev <- rowSums(fam.abund != 0) / ncol(phy.abund)
 	gen.prev <- rowSums(gen.abund != 0) / ncol(phy.abund)
+
 	
 	phy.abund <- rowMeans(t(t(phy.abund) / sam.abund))
 	fam.abund <- rowMeans(t(t(fam.abund) / sam.abund))
@@ -1243,6 +1242,14 @@ perform_sequence_stat_analysis <- function (data.obj, ann='') {
 	cat('\nThe most abundant phyla are ', paste(paste0(names(phy.abund), '(', phy.abund, '%)'), collapse=' '), ';')
 	cat('\nThe most abundant families are ', paste(paste0(names(fam.abund), '(', fam.abund, '%)'), collapse=' '), ';')
 	cat('\nand the most abundant genera are ', paste(paste0(names(gen.abund), '(', gen.abund, '%)'), collapse=' '), '.')
+	sink()
+	sink(paste0('Sequence_Analysis_Statistics_table_', ann, '.tsv'))
+	write.table(cbind(read.table(text=names(phy.prev)), unname(phy.prev), "Phylum", "Prevalence"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(fam.prev)), unname(fam.prev), "Family", "Prevalence"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(gen.prev)), unname(gen.prev), "Genus", "Prevalence"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(phy.abund)), unname(phy.abund), "Phylum", "Abundance"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(fam.abund)), unname(fam.abund), "Family", "Abundance"), row.names=FALSE, col.names=FALSE)
+	write.table(cbind(read.table(text=names(gen.abund)), unname(gen.abund), "Genus", "Abundance"), row.names=FALSE, col.names=FALSE)
 	sink()
 }
 
