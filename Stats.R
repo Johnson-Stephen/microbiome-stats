@@ -537,7 +537,7 @@ heatmap.3 <- function(x,
 }
 
 load_package <- function (package.names=c('MASS', 'ggbiplot', 'vegan', 'pscl', 'glmmADMB', 'aod', 'nlme', 'MiRKAT', 'matrixStats', 'gplots', 'scales', 'ggplot2', 'GUniFrac', 'rpart', 'qvalue', 'DESeq2',
-				'phangorn', 'phyloseq', 'RColorBrewer', 'squash', 'rhdf5', 'biom', 'reshape', 'randomForest', 'Boruta', 'ade4', 'gridExtra')) {
+				'phangorn', 'phyloseq', 'RColorBrewer', 'squash', 'rhdf5', 'biom', 'reshape', 'randomForest', 'Boruta', 'ade4')) {
 	for (package.name in package.names) {
 		require(package.name, character.only=T)
 	}
@@ -819,9 +819,10 @@ uniquefy_taxa_names <- function (data.obj) {
 }
 
 
-load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_taxonomy_greengenes, version='Old', species=TRUE, is.norm=FALSE,
-	    norm='GMPR', intersect.no=4, winsor=FALSE, winsor.qt=0.97,
-		filter.no=1, rep.seq=NULL, ko.file=NULL, cog.file=NULL, meta.sep='', quote="", comment="", read.gg=FALSE, rff=FALSE, dep=NULL, seed=1234) {
+load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_taxonomy_greengenes, version='Old', species=TRUE, filter.no=1, rep.seq=NULL,
+	     norm='TSS', intersect.no=4, winsor=FALSE, winsor.qt=0.97,
+		 ko.file=NULL, cog.file=NULL, ko.ann.file=NULL,
+		 meta.sep='', quote="", comment="", read.gg=FALSE, rff=FALSE, dep=NULL, seed=1234) {
 	# ko and cog file are not rarefied	
 	# filter.no: filter the OTUs with read support less than filter.no (default is filtering singleton); singleton will not be filtered after rarefaction
 	# winsorization and GMPR should be further studied. Current default is false and GMPR is on the genus level
@@ -916,79 +917,119 @@ load_data <- function (otu.file, map.file, tree.file=NULL, parseFunction=parse_t
 		rownames(abund.list.12[['Species']]) <- paste0("OTU", rownames(otu.tab.12), ":", otu.name.12[, 'Phylum'], ";", otu.name.12[, 'Genus'])
 	}
 	
-	if (rff != TRUE) {
-		if (is.norm) {
-			if (norm == 'GMPR') {
-				sf <- GMPR(abund.list.12[['Genus']], intersect.no)
-				names(sf) <- samIDs
-				warning('GMPR is only suitable for samples from a same body location!\n')
-			}
-			
-			if (norm == 'TSS') {
-				sf <- colSums(otu.tab.12)
-			}
-			
-			if (winsor == TRUE) {
-				# Addressing the outlier (97% percent) or at least one outlier
-				abund.list.12 <- sapply(abund.list.12, function(genus) {
-							genus.p <- t(t(genus) / sf)
-							genus.p <- apply(genus.p, 1, function(x) {
-										cutoff <- quantile(x, winsor.qt)
-										x[x >= cutoff] <- cutoff
-										x
-									}
-							)
-							# column/row switch
-							genus.w <- t(round(genus.p * sf))
-						})
-				# OTU table
-				otu.tab.12.p <- t(t(otu.tab.12) / sf)
-				otu.tab.12.p <- apply(otu.tab.12.p, 1, function(x) {
-							cutoff <- quantile(x, winsor.qt)
-							x[x >= cutoff] <- cutoff
-							x
-						}
-				)
-				# column/row switch
-				otu.tab.12 <- t(round(otu.tab.12.p * sf))
-			}
-			
+
+	if (norm == 'GMPR') {
+		sf <- GMPR(abund.list.12[['Genus']], intersect.no)
+		names(sf) <- samIDs
+		warning('GMPR is only suitable for samples from a same body location!\n')
+	} else {
+		if (norm == 'TSS') {
+			sf <- colSums(otu.tab.12)
 		} else {
 			sf <- NULL
 		}
-	} else {
-		sf <- NULL
 	}
 	
-	
+	if (winsor == TRUE) {
+		# Addressing the outlier (97% percent) or at least one outlier
+		abund.list.12 <- sapply(abund.list.12, function(genus) {
+					genus.p <- t(t(genus) / sf)
+					genus.p <- apply(genus.p, 1, function(x) {
+								cutoff <- quantile(x, winsor.qt)
+								x[x >= cutoff] <- cutoff
+								x
+							}
+					)
+					# column/row switch
+					genus.w <- t(round(genus.p * sf))
+				})
+		# OTU table
+		otu.tab.12.p <- t(t(otu.tab.12) / sf)
+		otu.tab.12.p <- apply(otu.tab.12.p, 1, function(x) {
+					cutoff <- quantile(x, winsor.qt)
+					x[x >= cutoff] <- cutoff
+					x
+				}
+		)
+		# column/row switch
+		otu.tab.12 <- t(round(otu.tab.12.p * sf))
+	}
+
+		
 	# Rarefaction/Normalizing factors are not calculated for functional data
 	if (!is.null(ko.file)) {
 		cat("Load kegg file...\n")
 		ko <- read_biom(ko.file)
-		ko.dat <- as.matrix(biom_data(ko))[, samIDs]
+		ko.dat <- as.matrix(biom_data(ko))
+		ko.dat <- ko.dat[, intersect(colnames(ko.dat), samIDs)]
 		# Rarefaction?
-		ko.ann <- observation_metadata(ko)
-		ko.ann <- cbind(KEGG_Pathways1=sapply(ko.ann, function(x) x['KEGG_Pathways1']), 
-				KEGG_Pathways2=sapply(ko.ann, function(x) x['KEGG_Pathways2']), 
-				KEGG_Pathways3=sapply(ko.ann, function(x) x['KEGG_Pathways3']))
-		rownames(ko.ann) <- rownames(ko.dat)		
-		ko.ann[is.na(ko.ann)] <- 'Unclassified'
-		
-		hierachs <- c("KEGG_Pathways1", "KEGG_Pathways2", "KEGG_Pathways3")
-		for (hierach in hierachs) {	
-			tax.family <- ko.ann[, hierach]
-			family <- aggregate(ko.dat, by=list(tax.family), FUN=sum)
-			rownames(family) <- family[, 1]
-			family <- as.matrix(family[, -1])
-			abund.list.12[[hierach]] <- family
+	  
+	    if (is.null(ko.ann.file)) {
+			# Old - back compatability
+			ko.ann <- observation_metadata(ko)
+			ko.ann <- cbind(KEGG_Pathways1=sapply(ko.ann, function(x) x['KEGG_Pathways1']), 
+					KEGG_Pathways2=sapply(ko.ann, function(x) x['KEGG_Pathways2']), 
+					KEGG_Pathways3=sapply(ko.ann, function(x) x['KEGG_Pathways3']))
+			rownames(ko.ann) <- rownames(ko.dat)		
+			ko.ann[is.na(ko.ann)] <- 'Unclassified'
+			
+			hierachs <- c("KEGG_Pathways1", "KEGG_Pathways2", "KEGG_Pathways3")
+			for (hierach in hierachs) {	
+				tax.family <- ko.ann[, hierach]
+				family <- aggregate(ko.dat, by=list(tax.family), FUN=sum)
+				rownames(family) <- family[, 1]
+				family <- as.matrix(family[, -1])
+				abund.list.12[[hierach]] <- family
+			}
+		} else {
+			# New
+			load(ko.ann.file)
+			#
+			kos <- rownames(ko.dat)
+			abund.list.12[["KEGG_Pathways3"]] <- NULL
+			kos.id <- NULL
+			for (ko.item in names(kegg.map)) {
+				kos.common <- intersect(kos, kegg.map[[ko.item]])
+				if (length(kos.common) != 0) {
+					abund.list.12[["KEGG_Pathways3"]] <- rbind(abund.list.12[["KEGG_Pathways3"]], colSums(ko.dat[kos.common, , drop=F]))
+					kos.id <- c(kos.id, ko.item)
+				}
+			}
+			rownames(abund.list.12[["KEGG_Pathways3"]]) <- kos.id
+			
+			abund.list.12[["KEGG_Metabolism"]] <- abund.list.12[["KEGG_Pathways3"]][intersect(kos.id, unlist(kegg.ann[['Metabolism']])), ]
+			rownames(abund.list.12[["KEGG_Metabolism"]]) <- paste0('M', rownames(abund.list.12[["KEGG_Metabolism"]])) 
+			
+			abund.list.12[["KEGG_Defense"]] <- NULL
+			kos.id <- NULL
+			for (ko.item in names(defense.map)) {
+				kos.common <- intersect(kos, defense.map[[ko.item]])
+				if (length(kos.common) != 0) {
+					abund.list.12[["KEGG_Defense"]] <- rbind(abund.list.12[["KEGG_Defense"]], colSums(ko.dat[kos.common, , drop=F]))
+					kos.id <- c(kos.id, ko.item)
+				}
+			}
+			rownames(abund.list.12[["KEGG_Defense"]]) <- kos.id
+			
+			abund.list.12[["KEGG_Toxin"]] <- NULL
+			kos.id <- NULL
+			for (ko.item in names(toxin.map)) {
+				kos.common <- intersect(kos, toxin.map[[ko.item]])
+				if (length(kos.common) != 0) {
+					abund.list.12[["KEGG_Toxin"]] <- rbind(abund.list.12[["KEGG_Toxin"]], colSums(ko.dat[kos.common, , drop=F]))
+					kos.id <- c(kos.id, ko.item)
+				}
+			}
+			rownames(abund.list.12[["KEGG_Toxin"]]) <- kos.id
 		}
-		
+	
 	}
 	
 	if (!is.null(cog.file)) {
 		cat("Load cog file...\n")
 		cog <- read_biom(cog.file)
-		cog.dat <- as.matrix(biom_data(cog))[, samIDs]
+		cog.dat <- as.matrix(biom_data(cog))
+		cog.dat <- cog.dat[, intersect(colnames(ko.dat), samIDs)]
 		# rarefaction?
 		cog.ann <- observation_metadata(cog)
 		hierachs <- c("COG_Category1", "COG_Category2")
@@ -1203,76 +1244,6 @@ perform_sequence_stat_analysis <- function (data.obj, ann='') {
 	cat('\nThe most abundant families are ', paste(paste0(names(fam.abund), '(', fam.abund, '%)'), collapse=' '), ';')
 	cat('\nand the most abundant genera are ', paste(paste0(names(gen.abund), '(', gen.abund, '%)'), collapse=' '), '.')
 	sink()
-}
-
-perform_sequence_stat_analysis2 <- function (data.obj, ann='') {
-  sink(paste0('Sequence_Analysis_Statistics_', ann, '.txt'))
-  otu.tab <- data.obj$otu.tab
-  
-  # Sequencing depth
-  otu.abund <- rowSums(otu.tab)
-  sam.abund <- colSums(otu.tab)
-  otu.prev <- rowSums(otu.tab!=0)/ncol(otu.tab)
-  
-  otu.abund <- otu.abund[otu.abund >= 1]
-  sam.abund <- sam.abund[sam.abund >= 1]
-  cat('16S rDNA targeted sequencing yields ', mean(sam.abund), 'reads/sample on average (range:', min(sam.abund), '-', max(sam.abund), ').')
-  cat('Clustering of these 16S sequence tags produces ', sum(otu.abund > 0), ' OTUs at 97% similarity level.')
-  
-  png(paste0('Sequence_Analysis_Statistics_', ann, '.png'), height=600, width=900)
-  obj <- ggplot2::ggplot(data=data.frame(x=otu.abund), aes(x=x)) + geom_histogram(col='black', fill='gray') + ylab('Frequency') + xlab('Abundance(Total counts)') +
-    scale_x_log10(breaks=c(1, 10, 100, 1000, 10000, 100000, 100000))
-  obj2 <- ggplot2::ggplot(data=data.frame(x=sam.abund), aes(x=x)) + geom_histogram(col='black', fill='gray')  + ylab('Frequency') + xlab('Sequencing depth')
-  obj3 <- ggplot2::ggplot(data=data.frame(x=otu.prev), aes(x=x))  + ylab('Frequency') + xlab('Prevalence(Occurence frequency)') + geom_histogram(col='black', fill='gray')
-  multiplot(obj,obj2,obj3, cols=1)
-  dev.off()
-  
-  phy.abund <- data.obj$abund.list[['Phylum']]
-  fam.abund <- data.obj$abund.list[['Family']]
-  gen.abund <- data.obj$abund.list[['Genus']]
-  
-  phy.prev <- rowSums(phy.abund != 0) / ncol(phy.abund)
-  fam.prev <- rowSums(fam.abund != 0) / ncol(phy.abund)
-  gen.prev <- rowSums(gen.abund != 0) / ncol(phy.abund)
-  
-  phy.abund <- rowMeans(t(t(phy.abund) / sam.abund))
-  fam.abund <- rowMeans(t(t(fam.abund) / sam.abund))
-  gen.abund <- rowMeans(t(t(gen.abund) / sam.abund))
-  
-  cat('These OTUs belong to ', sum(phy.abund > 0), ' phyla,', sum(fam.abund > 0), ' families and ', sum(gen.abund > 0), 'genera.')
-  phy.prev <- sort(phy.prev, decr=T)
-  phy.prev <- round(phy.prev[phy.prev >= 0.90] * 100, 2)
-  
-  fam.prev <- sort(fam.prev, decr=T)
-  fam.prev <- round(fam.prev[fam.prev >= 0.90] * 100, 2)
-  
-  gen.prev <- sort(gen.prev, decr=T)
-  gen.prev <- round(gen.prev[gen.prev >= 0.90] * 100, 2)
-  cat('\nThe most prevalent phyla are ', paste(paste0(names(phy.prev), '(', phy.prev, '%)'), collapse=' '), ';')
-  cat('\nThe most prevalent families are ', paste(paste0(names(fam.prev), '(', fam.prev, '%)'), collapse=' '), ';')
-  cat('\nand the most prevalent genera are ', paste(paste0(names(gen.prev), '(', gen.prev, '%)'), collapse=' '), '.')
-  
-  phy.abund <- sort(phy.abund, decr=T)
-  phy.abund <- round(phy.abund[phy.abund >= 0.05] * 100, 2)
-  
-  fam.abund <- sort(fam.abund, decr=T)
-  fam.abund <- round(fam.abund[fam.abund >= 0.05] * 100, 2)
-  
-  gen.abund <- sort(gen.abund, decr=T)
-  gen.abund <- round(gen.abund[gen.abund >= 0.05] * 100, 2)
-  
-  cat('\nThe most abundant phyla are ', paste(paste0(names(phy.abund), '(', phy.abund, '%)'), collapse=' '), ';')
-  cat('\nThe most abundant families are ', paste(paste0(names(fam.abund), '(', fam.abund, '%)'), collapse=' '), ';')
-  cat('\nand the most abundant genera are ', paste(paste0(names(gen.abund), '(', gen.abund, '%)'), collapse=' '), '.')
-  sink()
-  sink(paste0('Sequence_Analysis_Statistics_table_', ann, '.tsv'))
-  write.table(cbind(read.table(text=names(phy.prev)), unname(phy.prev), "Phylum", "Prevalence"), row.names=FALSE, col.names=FALSE)
-  write.table(cbind(read.table(text=names(fam.prev)), unname(fam.prev), "Family", "Prevalence"), row.names=FALSE, col.names=FALSE)
-  write.table(cbind(read.table(text=names(gen.prev)), unname(gen.prev), "Genus", "Prevalence"), row.names=FALSE, col.names=FALSE)
-  write.table(cbind(read.table(text=names(phy.abund)), unname(phy.abund), "Phylum", "Abundance"), row.names=FALSE, col.names=FALSE)
-  write.table(cbind(read.table(text=names(fam.abund)), unname(fam.abund), "Family", "Abundance"), row.names=FALSE, col.names=FALSE)
-  write.table(cbind(read.table(text=names(gen.abund)), unname(gen.abund), "Genus", "Abundance"), row.names=FALSE, col.names=FALSE)
-  sink()
 }
 
 perform_demograph_analysis <- function (data.obj, grp.name) {
@@ -1529,76 +1500,6 @@ generate_alpha_boxplot <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL
 		
 	}
 	dev.off()
-}
-
-get_legend <- function(myplot){
-  tmp <- ggplot_gtable(ggplot_build(myplot))
-  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
-  legend <- tmp$grobs[[leg]]
-  return(legend)
-  
-}
-
-generate_alpha_boxplot2 <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL, grp.name, strata=NULL, 
-                                    measures=c('Observed', 'Chao1', 'Shannon', 'InvSimpson')) {	
-  # To be completed - jetter when strata is not null
-  if (rarefy == TRUE) {
-    if (is.null(depth)) {
-      depth <- min(sample_sums(phylo.obj))
-    } else {
-      if (depth > min(sample_sums(phylo.obj))) {
-        ind <- (sample_sums(phylo.obj) >= depth)
-        cat(sum(!ind), " samples do not have sufficient number of reads!\n")
-        
-        sample_data(phylo.obj) <- sample_data(phylo.obj)[ind, ] 
-        data.obj <- subset_data(data.obj, ind)
-      }
-    }
-    
-    phylo.even <- rarefy_even_depth(phylo.obj, depth, rngseed=12345)
-    est_rich <- estimate_richness(phylo.even, measures=measures)
-  } else {
-    est_rich <- estimate_richness(phylo.obj, measures=measures)
-  }
-  
-  df <- data.obj$meta.dat
-  grp <- df[, grp.name]
-  
-  hei <- 5
-  if (is.null(strata)) {
-    wid <- 5
-  } else {
-    wid <- 5.5
-  }
-  if (rarefy == T) {
-    png(paste0('Alpha_diversity_boxplot_rarefied.png'), height=600, width=900)
-  } else {
-    pdf(paste0('Alpha_diversity_boxplot_unrarefied.pdf'), height=hei, width=wid)
-  }
-  obj_list <- list()
-  if (is.null(strata)) {
-    df = data.frame(Value=est_rich[, measures], Group=grp)
-    mdf <- melt(df)
-    obj <- ggplot(mdf, aes(x=Group, y=value, col=Group)) + geom_boxplot(position=position_dodge(width=0.75), outlier.colour = NA) + 
-      geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) + labs(y="Alpha Diversity") + facet_wrap(~ variable, scale="free_y")
-    print(obj)
-  } else {
-    for (measure in measures) {
-      cat(measure, '\n')
-      xx <- x[, measure]		
-      grp2 <- df[, strata]
-      df2 <- data.frame(Value=xx, Group=grp, Strata=grp2)
-      
-      dodge <- position_dodge(width=0.95)
-      obj_list[[measure]] <- ggplot(df2, aes(x=Strata, y=Value, col=Group)) +
-        geom_boxplot(position=dodge,  outlier.colour = NA) + 
-        geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
-        labs(y=measure, x=strata) 
-    }
-    multiplot(plotlist=obj_list, cols=2)
-    
-  }
-  dev.off()
 }
 
 perform_alpha_test_otu <- function (data.obj, formula, grp.name, ...) {
@@ -5055,12 +4956,12 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 	}
 	
 
-	pdf(paste0("Taxa_Stacked_Barplot_Overall_Compo_", ann, ".pdf"), height=hei1, width=wid1)	
-  par(mar=par('mar') + c(0, margin, 0, 0))
+	pdf(paste0("Taxa_Stacked_Barplot_Overall_Compo_", ann, ".pdf"), height=hei1, width=wid1)
+	
+	par(mar=par('mar') + c(0, margin, 0, 0))
 	
 	name.list <- list()
 	col.list <- list()
-  overall_barplots <- list()
 	for (taxa.level in taxa.levels) {
 		abund0 <- data.obj$abund.list[[taxa.level]]
 		abund0 <- t(t(abund0) / colSums(abund0))
@@ -5082,34 +4983,62 @@ generate_stacked_barplot <- function(data.obj, grp.name=NULL, taxa.levels=c('Phy
 				args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
 		
 	}
- 
 	dev.off()
 	
 	# Generate averaged over stack barplot
-	pdf(paste0("Taxa_Stacked_Barplot_Grouped_Compo_", ann, ".pdf"), height=hei2, width=wid2)
-	
-	par(mar=par('mar') + c(0, margin, 0, 0))
-	for (taxa.level in taxa.levels) {
-		abund0 <- data.obj$abund.list[[taxa.level]]
-		abund0 <- t(t(abund0) / colSums(abund0))
+	cex.legend <- 10
+	if (!is.null(grp.name)) {
+		pdf(paste0("Taxa_Stacked_Barplot_Grouped_Compo_", ann, ".pdf"), height=hei2, width=wid2)
 		
-		abund0 <- t(apply(abund0, 1, function(x) {
-					tapply(x, grp, mean)
-				}))
+		par(mar=par('mar') + c(0, margin/length(taxa.levels), 0, 0))
+		par(mfrow=c(1, length(taxa.levels)))
+		for (taxa.level in taxa.levels) {
+			abund0 <- data.obj$abund.list[[taxa.level]]
+			abund0 <- t(t(abund0) / colSums(abund0))
+			
+			abund0 <- t(apply(abund0, 1, function(x) {
+								tapply(x, grp, mean)
+							}))
+			
+			abund1 <- abund0[name.list[[taxa.level]], ]
+			abund2 <- 1 - colSums(abund1)
+			
+			prop <- rbind(abund1, Other=abund2)
+			colnames(prop) <- colnames(abund0)
+			
+			newsize <- ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
+			cex.legend <- ifelse(cex.legend < newsize, cex.legend, newsize) 
+			#prop <- prop[, order(grp)]
+			barplot(prop, col=col.list[[taxa.level]], ylab='Proportion', las=2, cex.names=1, main=taxa.level)
+			#		legend.text=rownames(prop), args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-2.2, 0)))
+			
+		}
 		
-		abund1 <- abund0[name.list[[taxa.level]], ]
-		abund2 <- 1 - colSums(abund1)
-		
-		prop <- rbind(abund1, Other=abund2)
-		colnames(prop) <- colnames(abund0)
-				
-		cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
-		#prop <- prop[, order(grp)]
-		barplot(prop, col=col.list[[taxa.level]], ylab='Proportion', las=2, legend.text=rownames(prop), cex.names=0.5,
-				args.legend=list(x='left', bty='n',  cex=cex.legend, inset=c(-0.5, 0)), main=taxa.level)
-		
+		par(mar=c(0, 0, 0, 0))
+		par(oma=c(0, 0, 0, 0))
+		for (taxa.level in taxa.levels) {
+			abund0 <- data.obj$abund.list[[taxa.level]]
+			abund0 <- t(t(abund0) / colSums(abund0))
+			
+			abund0 <- t(apply(abund0, 1, function(x) {
+								tapply(x, grp, mean)
+							}))
+			
+			abund1 <- abund0[name.list[[taxa.level]], ]
+			abund2 <- 1 - colSums(abund1)
+			
+			prop <- rbind(abund1, Other=abund2)
+			colnames(prop) <- colnames(abund0)
+			
+		#	cex.legend = ifelse (nrow(prop) > 35, 35/nrow(prop)*0.75, 0.75)
+			#prop <- prop[, order(grp)]
+	        plot(1, type="n", axes=FALSE, xlab="", ylab="")
+			legend('left', legend=rownames(prop), bty='n', fill=col.list[[taxa.level]], cex=cex.legend)
+			
+		}
+		dev.off()
 	}
-	dev.off()
+
 }
 
 build.decision.tree <- function(data.obj,  resp.name, taxa.level='Species', binary=FALSE, taxa, ann='All') {
