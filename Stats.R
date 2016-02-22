@@ -1443,62 +1443,52 @@ generate_alpha_boxplot <- function (data.obj, phylo.obj, rarefy=TRUE, depth=NULL
 			if (depth > min(sample_sums(phylo.obj))) {
 				ind <- (sample_sums(phylo.obj) >= depth)
 				cat(sum(!ind), " samples do not have sufficient number of reads!\n")
-				
-				sample_data(phylo.obj) <- sample_data(phylo.obj)[ind, ] 
+				sample_data(phylo.obj) <- sample_data(phylo.obj)[ind, ]
 				data.obj <- subset_data(data.obj, ind)
 			}
 		}
-
 		phylo.even <- rarefy_even_depth(phylo.obj, depth, rngseed=12345)
-		x <- estimate_richness(phylo.even, measures=measures)
+		est_rich <- estimate_richness(phylo.even, measures=measures)
 	} else {
-		x <- estimate_richness(phylo.obj, measures=measures)
-	}
-	
+		est_rich <- estimate_richness(phylo.obj, measures=measures)
+	} 
+  
 	df <- data.obj$meta.dat
 	grp <- df[, grp.name]
-	
+  
 	hei <- 5
 	if (is.null(strata)) {
 		wid <- 5
-	} else {
+	} else { 
 		wid <- 5.5
-	}
+	} 
 	if (rarefy == T) {
-		pdf(paste0('Alpha_diversity_boxplot_rarefied.pdf'), height=hei, width=wid)
+		png(paste0('Alpha_diversity_boxplot_rarefied.png'), height=600, width=900)
 	} else {
 		pdf(paste0('Alpha_diversity_boxplot_unrarefied.pdf'), height=hei, width=wid)
 	}
+	obj_list <- list()
 	
 	if (is.null(strata)) {
-		for (measure in measures) {
-			cat(measure, '\n')
-			xx <- x[, measure]		
-			df2 <- data.frame(Value=xx, Group=grp)
-			dodge <- position_dodge(width=0.75)
-			obj <- ggplot(df2, aes(x=Group, y=Value, col=Group)) +
-					geom_boxplot(position=dodge,  outlier.colour = NA) + 
-					geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
-					labs(y=measure) +
-					theme(legend.position="none")
-			print(obj)
-		}	
+		df = data.frame(Value=est_rich[, measures], Group=grp)
+		mdf <- melt(df)
+		obj <- ggplot(mdf, aes(x=Group, y=value, col=Group)) + geom_boxplot(position=position_dodge(width=0.75), outlier.colour = NA) +
+		geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) + labs(y="Alpha Diversity") + facet_wrap(~ variable, scale="free_y")
+		print(obj)
 	} else {
 		for (measure in measures) {
 			cat(measure, '\n')
-			xx <- x[, measure]		
+			xx <- x[, measure]
 			grp2 <- df[, strata]
 			df2 <- data.frame(Value=xx, Group=grp, Strata=grp2)
-			
 			dodge <- position_dodge(width=0.95)
-			obj <- ggplot(df2, aes(x=Strata, y=Value, col=Group)) +
-					geom_boxplot(position=dodge,  outlier.colour = NA) + 
-					geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
-					labs(y=measure, x=strata) 
-			print(obj)
+			obj_list[[measure]] <- ggplot(df2, aes(x=Strata, y=Value, col=Group)) +
+			geom_boxplot(position=dodge,  outlier.colour = NA) + 
+			geom_jitter(alpha=0.6, size=3.0,  position = position_jitter(w = 0.1)) +
+			labs(y=measure, x=strata) 
 		}
-		
-	}
+		multiplot(plotlist=obj_list, cols=2)
+  	}
 	dev.off()
 }
 
